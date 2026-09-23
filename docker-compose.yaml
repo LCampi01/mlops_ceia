@@ -391,6 +391,10 @@ networks:
   backend:
     driver: bridge
 
+volumes:
+  db_data:
+  minio_data:
+
 configs:
   mlflow.sql:
     content: |
