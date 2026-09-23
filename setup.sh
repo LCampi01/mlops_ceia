@@ -5,7 +5,7 @@ COMMAND="$1"
 if [ "$COMMAND" == "--stop" ]; then
   docker compose stop
 elif [ "$COMMAND" == "--destroy" ]; then
-  docker compose down -v -t 0
+  docker compose down -v
 else
-  docker compose --profile all up
+  docker compose up -d
 fi

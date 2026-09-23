@@ -1,9 +1,6 @@
 x-airflow-common: &airflow-common
   build: './dockerfiles/airflow'
   image: extending_airflow:latest
-  profiles:
-    - airflow
-    - all
   environment: &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
@@ -48,10 +45,6 @@ services:
     restart: unless-stopped
     image: postgres:13
     container_name: postgres
-    profiles:
-      - airflow
-      - mlflow
-      - all
     ports:
       - "5432:5432"
     networks:
@@ -92,10 +85,6 @@ services:
     restart: unless-stopped
     image: quay.io/minio/minio:latest
     container_name: minio
-    profiles:
-      - mlflow
-      - airflow
-      - all
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -117,10 +106,6 @@ services:
   create_s3_buckets:
     image: quay.io/minio/mc:latest
     container_name: minio_create_bucket
-    profiles:
-      - mlflow
-      - airflow
-      - all
     depends_on:
       - s3
     networks:
@@ -139,9 +124,6 @@ services:
     build: "./dockerfiles/mlflow"
     image: mlflow
     container_name: mlflow
-    profiles:
-      - mlflow
-      - all
     depends_on:
       postgres:
         condition: service_healthy
@@ -174,8 +156,6 @@ services:
     build: "./dockerfiles/fastapi"
     image: backend_fastapi
     container_name: fastapi
-    profiles:
-      - all
     depends_on:
       mlflow:
         condition: service_healthy
@@ -293,8 +273,6 @@ services:
   airflow-cli:
     <<: *airflow-common
     container_name: airflow_cli
-    profiles:
-      - debug
     environment:
       <<: *airflow-common-env
       CONNECTION_CHECK_MAX_COUNT: "0"
