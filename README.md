@@ -1,4 +1,8 @@
 # Ejecución
+## Precondiciones
+Copiar el archivo `.env.example` a `.env` y poner valores serios.
+
+## Comandos
 * Para prenderlo:
 ```console
 $ ./setup.sh
@@ -16,12 +20,12 @@ $ ./setup.sh
 
 ## Minio
 * user: `secret-user`
-* pass: `3rjX0bUa5Vbm`
+* pass: `MINIO_SECRET_ACCESS_KEY` de `.env`
 
 ## Airflow
 * user: `secret-user`
-* pass: `4W67NTd2GHy7`
+* pass: `_AIRFLOW_WWW_USER_PASSWORD` de `.env`
 
 ## MLflow
 * user: `secret-user`
-* pass: `16AiS35uQNc2`
+* pass: `MLFLOW_AUTH_ADMIN_PASSWORD` de `.env`
