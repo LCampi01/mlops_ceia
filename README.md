@@ -30,9 +30,9 @@ $ ./setup.sh
 
 ## Credenciales del stack
 
-### Minio
+### ~~Minio~~ RustFS
 * user: `secret-user`
-* pass: `MINIO_SECRET_ACCESS_KEY` de `.env`
+* pass: `RUSTFS_SECRET_KEY` de `.env`
 
 ### Airflow
 * user: `secret-user`
