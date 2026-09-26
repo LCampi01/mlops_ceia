@@ -1,0 +1,11 @@
+boto3
+cryptography
+matplotlib
+mlflow[auth]
+mlflow[extras]
+numpy
+pandas
+psycopg2-binary
+pymysql
+scikit-learn
+seaborn

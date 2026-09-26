@@ -1,0 +1,388 @@
+x-airflow-common: &airflow-common
+  build: './dockerfiles/airflow'
+  image: extending_airflow:latest
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${PG_PASSWORD}@postgres/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:${PG_PASSWORD}@postgres/airflow
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+    AIRFLOW__CELERY__WORKER_CONCURRENCY: '2'
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${PG_PASSWORD}@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: '${AIRFLOW_FERNET_KEY}'
+    AIRFLOW__CORE__SECRET_KEY: '${AIRFLOW_SECRET_KEY}'
+    AIRFLOW__API__SECRET_KEY: '${AIRFLOW_SECRET_KEY}'
+    AIRFLOW__API_AUTH__JWT_SECRET: '${AIRFLOW_SECRET_KEY}'
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'True'
+    AIRFLOW__SECRETS__BACKEND: airflow.secrets.local_filesystem.LocalFilesystemBackend
+    AIRFLOW__SECRETS__BACKEND_KWARGS: '{"variables_file_path": "/opt/secrets/variables.yaml", "connections_file_path": "/opt/secrets/connections.yaml"}'
+    AWS_ACCESS_KEY_ID: secret-user
+    AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
+    AWS_ENDPOINT_URL_S3: http://s3:9000
+    MLFLOW_S3_ENDPOINT_URL: http://s3:9000
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/config:/opt/airflow/config
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./airflow/secrets:/opt/secrets
+  networks:
+    - frontend
+    - backend
+  user: "1000:0"
+  depends_on:  &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    restart: unless-stopped
+    image: postgres:13
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - backend
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=airflow
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=${PG_PASSWORD}
+      - POSTGRES_DATABASE=airflow
+      - POSTGRES_PORT=5432
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    configs:
+      - source: mlflow.sql
+        target: /docker-entrypoint-initdb.d/mlflow.sql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-p", "5432", "-U", "airflow"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+
+  redis:
+    image: valkey/valkey:8.1-bookworm
+    expose:
+      - 6379
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 30s
+      retries: 50
+      start_period: 30s
+    restart: unless-stopped
+
+  s3:
+    restart: unless-stopped
+    build: "./dockerfiles/rustfs"
+    image: rustfs
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - frontend
+      - backend
+    environment:
+      - RUSTFS_ACCESS_KEY=secret-user
+      - RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY}
+      - RUSTFS_SERVER_DOMAINS=localhost
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address :9001
+    healthcheck:
+      test: >
+        sh -c "
+        rc alias set local http://localhost:9000 secret-user $$RUSTFS_SECRET_KEY && 
+        rc admin info cluster local
+        "
+      interval: 60s
+      timeout: 20s
+      retries: 3
+
+  create_s3_buckets:
+    image: rustfs/rc:v0.1.36
+    container_name: minio_create_bucket
+    depends_on:
+      - s3
+    networks:
+      - backend
+    entrypoint: >
+      /bin/sh -c '
+      sleep 5;
+      /usr/bin/rc alias set s3 http://s3:9000 secret-user $${RUSTFS_SECRET_KEY};
+      /usr/bin/rc mb s3/mlflow;
+      /usr/bin/rc mb s3/data;
+      exit 0;
+      '
+
+  mlflow:
+    restart: unless-stopped
+    build: "./dockerfiles/mlflow"
+    image: mlflow
+    container_name: mlflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    networks:
+      - frontend
+      - backend
+    environment:
+      - AWS_ACCESS_KEY_ID=secret-user
+      - AWS_SECRET_ACCESS_KEY=${RUSTFS_SECRET_KEY}
+      - MLFLOW_S3_ENDPOINT_URL=http://s3:9000
+      - MLFLOW_AUTH_ADMIN_USERNAME=secret-user
+      - MLFLOW_AUTH_ADMIN_PASSWORD=${MLFLOW_AUTH_ADMIN_PASSWORD}
+      - MLFLOW_FLASK_SERVER_SECRET_KEY=${MLFLOW_FLASK_SERVER_SECRET_KEY}
+    command: >
+      mlflow server 
+      --app-name basic-auth
+      --backend-store-uri postgresql://airflow:${PG_PASSWORD}@postgres:5432/mlflow_db
+      --host 0.0.0.0
+      --default-artifact-root s3:mlflow/
+      --workers 1
+      --allowed-hosts "localhost"
+      --cors-allowed-origins "http://localhost:5000"
+    healthcheck:
+      test: curl -f http://$${MLFLOW_AUTH_ADMIN_USERNAME}:$${MLFLOW_AUTH_ADMIN_PASSWORD}@mlflow:5000/health || exit 1
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  fastapi:
+    restart: unless-stopped
+    build: "./dockerfiles/fastapi"
+    image: backend_fastapi
+    container_name: fastapi
+    depends_on:
+      mlflow:
+        condition: service_healthy
+      airflow-apiserver:
+        condition: service_healthy
+    ports:
+      - "8800:8800"
+    networks:
+      - frontend
+      - backend
+    environment:
+      - AWS_ACCESS_KEY_ID=secret-user
+      - AWS_SECRET_ACCESS_KEY=${RUSTFS_SECRET_KEY}
+      - MLFLOW_S3_ENDPOINT_URL=http://s3:9000
+      - AWS_ENDPOINT_URL_S3=http://s3:9000
+    command: >
+      uvicorn app:app 
+      --host 0.0.0.0
+      --port 8800
+    healthcheck:
+      test: curl --include --request GET http://fastapi:8800/ || exit 1
+      interval: 60s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+
+  airflow-apiserver:
+    <<: *airflow-common
+    container_name: airflow-apiserver
+    command: api-server --workers 1
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+  
+  airflow-worker:
+    <<: *airflow-common
+    command: celery worker -c 2
+    healthcheck:
+      # yamllint disable rule:line-length
+      test:
+        - "CMD-SHELL"
+        - 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}" || celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    environment:
+      <<: *airflow-common-env
+      # Required to handle warm shutdown of the celery workers properly
+      # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
+      DUMB_INIT_SETSID: "0"
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-apiserver:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully       
+
+  airflow-triggerer:
+    <<: *airflow-common
+    command: triggerer
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-cli:
+    <<: *airflow-common
+    container_name: airflow_cli
+    environment:
+      <<: *airflow-common-env
+      CONNECTION_CHECK_MAX_COUNT: "0"
+    # Workaround for entrypoint issue. See: https://github.com/apache/airflow/issues/16252
+    command:
+      - bash
+      - -c
+      - airflow
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    # yamllint disable rule:line-length
+    command:
+      - -c
+      - |
+        one_meg=1048576
+        mem_available=$$(($$(getconf _PHYS_PAGES) * $$(getconf PAGE_SIZE) / one_meg))
+        cpus_available=$$(grep -cE 'cpu[0-9]+' /proc/stat)
+        disk_available=$$(df / | tail -1 | awk '{print $$4}')
+        warning_resources="false"
+        if (( mem_available < 4000 )) ; then
+          echo
+          echo -e "\033[1;33mWARNING!!!: Not enough memory available for Docker.\e[0m"
+          echo "At least 4GB of memory required. You have $$(numfmt --to iec $$((mem_available * one_meg)))"
+          echo
+          warning_resources="true"
+        fi
+        if (( cpus_available < 2 )); then
+          echo
+          echo -e "\033[1;33mWARNING!!!: Not enough CPUS available for Docker.\e[0m"
+          echo "At least 2 CPUs recommended. You have $${cpus_available}"
+          echo
+          warning_resources="true"
+        fi
+        if (( disk_available < one_meg * 10 )); then
+          echo
+          echo -e "\033[1;33mWARNING!!!: Not enough Disk space available for Docker.\e[0m"
+          echo "At least 10 GBs recommended. You have $$(numfmt --to iec $$((disk_available * 1024 )))"
+          echo
+          warning_resources="true"
+        fi
+        if [[ $${warning_resources} == "true" ]]; then
+          echo
+          echo -e "\033[1;33mWARNING!!!: You have not enough resources to run Airflow (see above)!\e[0m"
+          echo "Please follow the instructions to increase amount of resources available:"
+          echo "   https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html#before-you-begin"
+          echo
+        fi
+        echo
+        echo "Creating missing opt dirs if missing:"
+        echo
+        mkdir -v -p /opt/airflow/{logs,dags,plugins,config}
+        echo
+        echo "Airflow version:"
+        /entrypoint airflow version
+        echo
+        echo "Files in shared volumes:"
+        echo
+        ls -la /opt/airflow/{logs,dags,plugins,config}
+        echo
+        echo "Running airflow config list to create default config file if missing."
+        echo
+        /entrypoint airflow config list >/dev/null
+        echo
+        echo "Files in shared volumes:"
+        echo
+        ls -la /opt/airflow/{logs,dags,plugins,config}
+        echo
+        echo "Change ownership of files in /opt/airflow to 1000:0"
+        echo
+        chown -R "1000:0" /opt/airflow/
+        echo
+        echo "Change ownership of files in shared volumes to 1000:0"
+        echo
+        chown -v -R "1000:0" /opt/airflow/{logs,dags,plugins,config}
+        echo
+        echo "Files in shared volumes:"
+        echo
+        ls -la /opt/airflow/{logs,dags,plugins,config}
+    # yamllint enable rule:line-length
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: secret-user
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD}
+      _PIP_ADDITIONAL_REQUIREMENTS: ''
+    user: "0:0"
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+
+volumes:
+  db_data:
+  minio_data:
+
+configs:
+  mlflow.sql:
+    content: |
+      CREATE DATABASE mlflow_db
