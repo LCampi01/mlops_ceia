@@ -95,7 +95,7 @@ services:
     environment:
       - RUSTFS_ACCESS_KEY=secret-user
       - RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY}
-      - RUSTFS_SERVER_DOMAINS=localhost
+      - RUSTFS_SERVER_DOMAINS=${RUSTFS_SERVER_DOMAINS:-localhost}
     volumes:
       - minio_data:/data
     command: server /data --console-address :9001
@@ -152,8 +152,8 @@ services:
       --host 0.0.0.0
       --default-artifact-root s3:mlflow/
       --workers 1
-      --allowed-hosts "localhost"
-      --cors-allowed-origins "http://localhost:5000"
+      --allowed-hosts "${MLFLOW_ALLOWED_HOSTS:-localhost}"
+      --cors-allowed-origins "${MLFLOW_CORS_ALLOWED_ORIGINS:-http://localhost:5000}"
     healthcheck:
       test: curl -f http://$${MLFLOW_AUTH_ADMIN_USERNAME}:$${MLFLOW_AUTH_ADMIN_PASSWORD}@mlflow:5000/health || exit 1
       interval: 60s
