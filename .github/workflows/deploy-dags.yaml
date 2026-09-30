@@ -1,0 +1,23 @@
+name: Deploy Airflow DAGs
+on:
+  push:
+    branches:
+    - main
+    paths:
+    - 'airflow/dags/**'
+concurrency:
+  group: airflow-dags-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on:
+    - self-hosted
+    - mlops-stack
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Sync DAGs
+      env:
+        TARGET_DIR: ${{ vars.TARGET_DIR }}
+      run: |
+        rsync -av --delete airflow/dags/ "$TARGET_DIR"/
