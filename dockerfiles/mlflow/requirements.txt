@@ -6,6 +6,7 @@ mlflow[extras]
 numpy
 pandas
 psycopg2-binary
+psycopg[binary]
 pymysql
 scikit-learn
 seaborn

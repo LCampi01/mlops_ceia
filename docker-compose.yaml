@@ -152,7 +152,7 @@ services:
       --host 0.0.0.0
       --default-artifact-root s3:mlflow/
       --workers 1
-      --allowed-hosts "${MLFLOW_ALLOWED_HOSTS:-localhost}"
+      --allowed-hosts "${MLFLOW_ALLOWED_HOSTS:-localhost:5000}"
       --cors-allowed-origins "${MLFLOW_CORS_ALLOWED_ORIGINS:-http://localhost:5000}"
     healthcheck:
       test: curl -f http://$${MLFLOW_AUTH_ADMIN_USERNAME}:$${MLFLOW_AUTH_ADMIN_PASSWORD}@mlflow:5000/health || exit 1
