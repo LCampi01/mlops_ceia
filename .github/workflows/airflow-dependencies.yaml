@@ -20,6 +20,6 @@ jobs:
       env:
         TARGET_DIR: ${{ vars.TARGET_DIR }}
       run: |
-        cp -vf "dockerfiles/airflow/requirements.txt" "$TARGET_DIR/dockerfiles/airflow/requirements.txt"
+        cp -vf "dockerfiles/airflow/requirements.txt" "$TARGET_DIR/dockerfiles/airflow/requirements.txt" || true
         cd "$TARGET_DIR"
         ./setup.sh
