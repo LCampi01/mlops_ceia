@@ -1,0 +1,24 @@
+name: Redeploy Stack
+on:
+  push:
+    branches:
+    - main
+    paths:
+    - 'dockerfiles/airflow/requirements.txt'
+concurrency:
+  group: airflow-dependencies
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on:
+    - self-hosted
+    - mlops-stack
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Redeploy
+      env:
+        TARGET_DIR: ${{ vars.TARGET_DIR }}
+      run: |
+        cd "$TARGET_DIR"
+        ./setup.sh
