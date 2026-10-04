@@ -20,4 +20,4 @@ jobs:
       env:
         TARGET_DIR: ${{ vars.TARGET_DIR }}
       run: |
-        rsync -av --delete airflow/dags/ "$TARGET_DIR"/airflow/dags
+        rsync --perms --no-owner --no-group -rtlv --delete airflow/dags/ "$TARGET_DIR"/airflow/dags
