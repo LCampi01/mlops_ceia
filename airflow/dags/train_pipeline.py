@@ -17,12 +17,12 @@ def run_training_pipeline():
     os.makedirs(MODELS_DIR, exist_ok=True)
     
     # 1. Carga de datos
-    X_train = load_npz(DATASETS_DIR/X_train.npz')
-    X_test = load_npz(DATASETS_DIR/X_test.npz')
-    X_extra_train = pd.read_csv(DATASETS_DIR/X_extra_train.csv')
-    X_extra_test = pd.read_csv(DATASETS_DIR/X_extra_test.csv')
-    y_train = pd.read_csv(DATASETS_DIR/y_train.csv')['label']
-    y_test = pd.read_csv(DATASETS_DIR/y_test.csv')['label']
+    X_train = load_npz(os.path.join(DATASETS_DIR, 'X_train.npz'))
+    X_test = load_npz(os.path.join(DATASETS_DIR, 'X_test.npz'))
+    X_extra_train = pd.read_csv(os.path.join(DATASETS_DIR, 'X_extra_train.csv'))
+    X_extra_test = pd.read_csv(os.path.join(DATASETS_DIR, 'X_extra_test.csv'))
+    y_train = pd.read_csv(os.path.join(DATASETS_DIR, 'y_train.csv'))['label']
+    y_test = pd.read_csv(os.path.join(DATASETS_DIR, 'y_test.csv'))['label']
 
     # 2. Preprocesamiento
     ohe = OneHotEncoder(drop='first', handle_unknown='ignore')
