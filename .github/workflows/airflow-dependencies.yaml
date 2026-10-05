@@ -1,12 +1,12 @@
-name: Deploy Airflow DAGs
+name: Redeploy Stack
 on:
   push:
     branches:
     - main
     paths:
-    - 'airflow/dags/**'
+    - "dockerfiles/airflow/requirements.txt"
 concurrency:
-  group: airflow-dags-deploy
+  group: airflow-dependencies
   cancel-in-progress: false
 jobs:
   deploy:
@@ -16,8 +16,10 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    - name: Sync DAGs
+    - name: Redeploy
       env:
         TARGET_DIR: ${{ vars.TARGET_DIR }}
       run: |
-        rsync -rtlv --delete airflow/dags/ "$TARGET_DIR"/airflow/dags || true
+        cp -vf "dockerfiles/airflow/requirements.txt" "$TARGET_DIR/dockerfiles/airflow/requirements.txt" || true
+        cd "$TARGET_DIR"
+        ./setup.sh

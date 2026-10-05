@@ -7,5 +7,5 @@ if [ "$COMMAND" == "--stop" ]; then
 elif [ "$COMMAND" == "--destroy" ]; then
   docker compose down -v
 else
-  docker compose up -d
+  docker compose up -d --build
 fi
