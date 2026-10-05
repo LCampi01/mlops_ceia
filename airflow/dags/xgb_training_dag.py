@@ -21,7 +21,7 @@ with DAG(
     'xgb_phishing_retrain_pipeline',
     default_args=default_args,
     description='Pipeline de re-entrenamiento de modelo XGBoost para detección de phishing',
-    schedule_interval='@monthly', # Se ejecuta mensualmente o manualmente
+    schedule = '@monthly', # Se ejecuta mensualmente o manualmente
     start_date=datetime(2026, 1, 1),
     catchup=False,
 ) as dag:
