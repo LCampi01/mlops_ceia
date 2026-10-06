@@ -1,10 +1,8 @@
-name: Redeploy Stack
+name: Deploy Stack
 on:
   push:
     branches:
     - main
-    paths:
-    - "dockerfiles/airflow/requirements.txt"
 concurrency:
   group: airflow-dependencies
   cancel-in-progress: false
@@ -16,10 +14,10 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    - name: Redeploy
+    - name: Deploy
       env:
         TARGET_DIR: ${{ vars.TARGET_DIR }}
       run: |
-        cp -vf "dockerfiles/airflow/requirements.txt" "$TARGET_DIR/dockerfiles/airflow/requirements.txt" || true
+        rsync -rtlv --delete --exclude-from=.gitignore . "$TARGET_DIR" || true
         cd "$TARGET_DIR"
         ./setup.sh
