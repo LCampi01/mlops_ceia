@@ -351,13 +351,13 @@ services:
         echo
         ls -la /opt/airflow/{logs,dags,plugins,config}
         echo
-        echo "Change ownership of files in /opt/airflow to 1000:0"
+        echo "Change ownership of files in /opt/airflow to 1001:0"
         echo
-        chown -R "1000:0" /opt/airflow/
+        chown -R "1001:0" /opt/airflow/
         echo
-        echo "Change ownership of files in shared volumes to 1000:0"
+        echo "Change ownership of files in shared volumes to 1001:0"
         echo
-        chown -v -R "1000:0" /opt/airflow/{logs,dags,plugins,config}
+        chown -v -R "1001:0" /opt/airflow/{logs,dags,plugins,config}
         echo
         echo "Files in shared volumes:"
         echo
