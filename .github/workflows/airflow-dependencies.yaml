@@ -14,10 +14,11 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        path: ${{ vars.TARGET_DIR }}
     - name: Deploy
       env:
         TARGET_DIR: ${{ vars.TARGET_DIR }}
       run: |
-        rsync -rtlv --delete --exclude-from=.gitignore . "$TARGET_DIR" || true
         cd "$TARGET_DIR"
         ./setup.sh
