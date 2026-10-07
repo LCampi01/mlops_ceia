@@ -12,8 +12,10 @@ jobs:
     - self-hosted
     - mlops-stack
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+    - name: Pull latest changes
+      run: |
+        git fetch origin main
+        git reset --hard origin/main
     - name: Deploy
       run: |
         ./setup.sh
