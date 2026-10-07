@@ -24,6 +24,7 @@ x-airflow-common: &airflow-common
     AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
     AWS_ENDPOINT_URL_S3: http://s3:9000
     MLFLOW_S3_ENDPOINT_URL: http://s3:9000
+    KAGGLE_API_TOKEN: ${KAGGLE_API_TOKEN}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
