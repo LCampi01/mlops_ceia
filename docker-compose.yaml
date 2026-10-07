@@ -33,7 +33,7 @@ x-airflow-common: &airflow-common
   networks:
     - frontend
     - backend
-  user: "1000:0"
+  user: "1001:0"
   depends_on:  &airflow-common-depends-on
     postgres:
       condition: service_healthy
