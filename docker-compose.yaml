@@ -24,6 +24,12 @@ x-airflow-common: &airflow-common
     AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
     AWS_ENDPOINT_URL_S3: http://s3:9000
     MLFLOW_S3_ENDPOINT_URL: http://s3:9000
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    MLFLOW_TRACKING_USERNAME: secret-user
+    MLFLOW_TRACKING_PASSWORD: ${MLFLOW_AUTH_ADMIN_PASSWORD}
+    OMP_NUM_THREADS: '1'
+    OPENBLAS_NUM_THREADS: '1'
+    MKL_NUM_THREADS: '1'
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
@@ -113,16 +119,18 @@ services:
     image: rustfs/rc:v0.1.36
     container_name: minio_create_bucket
     depends_on:
-      - s3
+      s3:
+        condition: service_healthy
+    environment:
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
     networks:
       - backend
     entrypoint: >
       /bin/sh -c '
-      sleep 5;
+      set -e;
       /usr/bin/rc alias set s3 http://s3:9000 secret-user $${RUSTFS_SECRET_KEY};
-      /usr/bin/rc mb s3/mlflow;
-      /usr/bin/rc mb s3/data;
-      exit 0;
+      /usr/bin/rc ls s3/mlflow || /usr/bin/rc mb s3/mlflow;
+      /usr/bin/rc ls s3/data || /usr/bin/rc mb s3/data;
       '
 
   mlflow:
@@ -150,9 +158,9 @@ services:
       --app-name basic-auth
       --backend-store-uri postgresql://airflow:${PG_PASSWORD}@postgres:5432/mlflow_db
       --host 0.0.0.0
-      --default-artifact-root s3:mlflow/
+      --default-artifact-root s3://mlflow/
       --workers 1
-      --allowed-hosts "${MLFLOW_ALLOWED_HOSTS:-localhost:5000}"
+      --allowed-hosts "${MLFLOW_ALLOWED_HOSTS:-localhost:5000,mlflow:5000}"
       --cors-allowed-origins "${MLFLOW_CORS_ALLOWED_ORIGINS:-http://localhost:5000}"
     healthcheck:
       test: curl -f http://$${MLFLOW_AUTH_ADMIN_USERNAME}:$${MLFLOW_AUTH_ADMIN_PASSWORD}@mlflow:5000/health || exit 1
@@ -180,6 +188,9 @@ services:
       - AWS_SECRET_ACCESS_KEY=${RUSTFS_SECRET_KEY}
       - MLFLOW_S3_ENDPOINT_URL=http://s3:9000
       - AWS_ENDPOINT_URL_S3=http://s3:9000
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MLFLOW_TRACKING_USERNAME=secret-user
+      - MLFLOW_TRACKING_PASSWORD=${MLFLOW_AUTH_ADMIN_PASSWORD}
     command: >
       uvicorn app:app 
       --host 0.0.0.0
