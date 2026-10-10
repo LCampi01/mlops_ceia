@@ -1,31 +1,58 @@
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from datetime import datetime, timedelta
+from airflow.decorators import dag, task
+from airflow.models import Variable
+from datetime import datetime
 
-import sys
-sys.path.append("/opt/airflow/dags")
+BUCKET_NAME = "data"
+DATASET_FILENAME = "Phishing_Email.csv"
+KAGGLE_DATASET = "subhajournal/phishingemails"
 
-from kaggle_pipeline import download_dataset
-
-with DAG(
-    "download_dataset",
-    default_args={
-        "owner": "mlops_team",
-        "depends_on_past": False,
-        "email_on_failure": False,
-        "email_on_retry": False,
-        "retries": 2,
-        "retry_delay": timedelta(minutes=3),
-    },
-    description=("Descarga dataset y lo almacena en directorio local."),
+@dag(
+    dag_id="download_dataset",
+    description="Descarga el dataset bajo demanda.",
     schedule=None,
-    start_date=datetime(2026, 10, 6),
+    start_date=datetime(2024, 1, 1),
     catchup=False,
-) as dag:
+    tags=["phishing_detection"]
+)
+def download_dataset():
 
-    task_download = PythonOperator(
-        task_id="download_kaggle_dataset",
-        python_callable=download_dataset,
+    @task.virtualenv(
+        task_id="dataset_download",
+        requirements=[ "kagglehub==1.0.2" ],
+        system_site_packages=True,
+        env_vars={
+            "KAGGLE_API_TOKEN": Variable.get("KAGGLE_API_TOKEN")
+        }
+    )
+    def dataset_download(
+        bucket_name: str,
+        dataset_filename: str,
+        kaggle_dataset: str,
+    ) -> str:
+        import boto3
+        import kagglehub
+        import uuid
+
+        import os
+
+        print(f"Descargando dataset '{kaggle_dataset}'.")
+        local_path = kagglehub.dataset_download(
+            handle=kaggle_dataset,
+            path=dataset_filename,
+        )
+        key = f"datasets/raw/data_{uuid.uuid4().hex}.csv"
+        s3_path = f"s3://{bucket_name}/{key}"
+        print(f"Subiendo dataset a '{s3_path}'")
+        with open(local_path, "rb") as f:
+            boto3.client("s3").put_object(Bucket=bucket_name, Key=key, Body=f)
+        os.remove(local_path)
+        print(f"Dataset guardado en: {s3_path}")
+        return s3_path
+
+    _ = dataset_download(
+        bucket_name=BUCKET_NAME,
+        dataset_filename=DATASET_FILENAME,
+        kaggle_dataset=KAGGLE_DATASET,
     )
 
-    task_download
+dag = download_dataset()
