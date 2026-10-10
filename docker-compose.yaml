@@ -24,7 +24,6 @@ x-airflow-common: &airflow-common
     AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
     AWS_ENDPOINT_URL_S3: http://s3:9000
     MLFLOW_S3_ENDPOINT_URL: http://s3:9000
-    KAGGLE_API_TOKEN: ${KAGGLE_API_TOKEN}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
@@ -117,10 +116,13 @@ services:
       - s3
     networks:
       - backend
+    environment:
+      - RUSTFS_ACCESS_KEY=secret-user
+      - RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY}
     entrypoint: >
       /bin/sh -c '
       sleep 5;
-      /usr/bin/rc alias set s3 http://s3:9000 secret-user $${RUSTFS_SECRET_KEY};
+      /usr/bin/rc alias set s3 http://s3:9000 $${RUSTFS_ACCESS_KEY} $${RUSTFS_SECRET_KEY};
       /usr/bin/rc mb s3/mlflow;
       /usr/bin/rc mb s3/data;
       exit 0;
@@ -205,8 +207,6 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
-    environment:
-      KAGGLE_API_TOKEN: ${KAGGLE_API_TOKEN}
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -222,8 +222,6 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
-    environment:
-      KAGGLE_API_TOKEN: ${KAGGLE_API_TOKEN}
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -261,6 +259,7 @@ services:
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
+      UV_CACHE_DIR: "/opt/airflow/.cache/uv"
     restart: unless-stopped
     depends_on:
       <<: *airflow-common-depends-on
