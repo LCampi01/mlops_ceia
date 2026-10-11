@@ -15,11 +15,12 @@ Servir un modelo de detección de _spam_ en un stack de MLFlow / Airflow / FastA
 
 | DAG | Qué hace | Frecuencia |
 | --- | --- | --- |
-| `download_dataset` | Descarga el dataset de phishing desde Kaggle y lo guarda en RustFS. Pendiente de integrar desde `feat-dataset-download`. | Manual |
+| `download_dataset` | Descarga el dataset de phishing desde Kaggle y lo guarda en RustFS como `datasets/raw/data_<uuid>.csv`. | Manual |
 | [`phishing_training`](airflow/dags/phishing_training_dag.py) | Prepara los datos, compara Naive Bayes, regresión logística y XGBoost, y registra el mejor en MLflow. | Cada 3 meses |
 | [`phishing_champion_retrain`](airflow/dags/champion_training_dag.py) | Reentrena el modelo marcado como `champion`, conservando su algoritmo e hiperparámetros. | Mensual |
 
-**Entrenamiento y comparación:** lee `s3://data/datasets/Phishing_Email.csv`,
+**Entrenamiento y comparación:** lee el CSV `data_*.csv` más reciente (por fecha
+de subida) de `s3://data/datasets/raw/`,
 limpia los correos y separa 70% para entrenamiento, 15% para validación y 15% para
 test. Calcula un baseline heurístico como referencia y entrena los tres modelos.
 Elige el de mayor F1 de validación y lo evalúa sobre test.
@@ -29,7 +30,7 @@ preparar_datos → entrenar_modelos → registrar_mejor_modelo
 ```
 
 **Reentrenamiento:** carga el pipeline completo del `champion`, prepara el CSV
-actual de RustFS y vuelve a ajustar el preprocesamiento y el modelo. Guarda los
+más reciente de esa misma ubicación en RustFS y vuelve a ajustar el preprocesamiento y el modelo. Guarda los
 resultados en MLflow y registra una nueva versión como `challenger`.
 
 El entrenamiento trimestral corre el 1 de enero, abril, julio y octubre; el
@@ -87,6 +88,19 @@ Los resultados se consultan en `http://localhost:5000`.
 
 ### Precondiciones
 Copiar el archivo `.env.example` a `.env` y poner valores serios.
+
+Para descargar el dataset, completar `KAGGLE_API_TOKEN` en `.env` con el token
+de Kaggle. Docker Compose lo expone como `AIRFLOW_VAR_KAGGLE_API_TOKEN`, que
+permite al DAG leerlo con `Variable.get("KAGGLE_API_TOKEN")`. No hace falta crear
+una Variable en la interfaz de Airflow; las variables definidas por entorno no
+aparecen en esa pantalla.
+Si se cambia el token con el stack levantado, aplicar el cambio con:
+
+```console
+docker compose up -d --no-deps airflow-apiserver airflow-scheduler airflow-dag-processor airflow-worker airflow-triggerer
+```
+
+Un `docker compose restart` no actualiza las variables de entorno.
 
 ### Comandos
 * Para prenderlo:

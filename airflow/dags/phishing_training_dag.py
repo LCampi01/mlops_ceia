@@ -7,9 +7,27 @@ from airflow.models.param import Param
 from airflow.providers.standard.operators.python import PythonOperator
 
 BUCKET = "data"
-DATASET_KEY = "datasets/Phishing_Email.csv"
+DATASET_PREFIX = "datasets/raw/data_"
 EXPERIMENT_NAME = "phishing-comparison"
 MODEL_NAME = "phishing_detector"
+
+
+def obtener_ultimo_dataset(s3):
+    pages = s3.get_paginator("list_objects_v2").paginate(
+        Bucket=BUCKET, Prefix=DATASET_PREFIX,
+    )
+    datasets = (
+        obj
+        for page in pages
+        for obj in page.get("Contents", [])
+        if obj["Key"].endswith(".csv")
+    )
+    latest = max(datasets, key=lambda obj: (obj["LastModified"], obj["Key"]), default=None)
+    if latest is None:
+        raise ValueError(
+            f"No hay datasets en s3://{BUCKET}/{DATASET_PREFIX}*.csv. "
+        )
+    return latest["Key"]
 
 
 def preparar_datos(run_id):
@@ -17,9 +35,11 @@ def preparar_datos(run_id):
     import pandas as pd
     from sklearn.model_selection import train_test_split
 
-    # El DAG del compañero deja el CSV original en esta ubicación de RustFS.
+    # Cada descarga genera un nombre nuevo; usar la más reciente por fecha de subida.
     s3 = boto3.client("s3")
-    response = s3.get_object(Bucket=BUCKET, Key=DATASET_KEY)
+    dataset_key = obtener_ultimo_dataset(s3)
+    print(f"Dataset seleccionado: s3://{BUCKET}/{dataset_key}")
+    response = s3.get_object(Bucket=BUCKET, Key=dataset_key)
     try:
         df = pd.read_csv(response["Body"])
     finally:
