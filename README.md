@@ -30,8 +30,9 @@ preparar_datos → entrenar_modelos → registrar_mejor_modelo
 ```
 
 **Reentrenamiento:** carga el pipeline completo del `champion`, prepara el CSV
-más reciente de esa misma ubicación en RustFS y vuelve a ajustar el preprocesamiento y el modelo. Guarda los
-resultados en MLflow y registra una nueva versión como `challenger`.
+más reciente de esa misma ubicación en RustFS y vuelve a ajustar el
+preprocesamiento y el modelo. Guarda los resultados en MLflow y registra una
+nueva versión como `challenger`.
 
 El entrenamiento trimestral corre el 1 de enero, abril, julio y octubre; el
 reentrenamiento corre el día 1 de cada mes. Ambos a las 00:00 UTC, también admiten
@@ -87,7 +88,9 @@ hay que actualizar antes el CSV mediante la descarga.
 Los resultados se consultan en `http://localhost:5000`.
 
 ### Precondiciones
-Copiar el archivo `.env.example` a `.env` y poner valores serios.
+Tener Docker con Compose disponible. Copiar el archivo `.env.example` a `.env`
+si todavía no existe y completar las credenciales; conservar el `.env` propio
+al actualizar la branch.
 
 Para descargar el dataset, completar `KAGGLE_API_TOKEN` en `.env` con el token
 de Kaggle. Docker Compose lo expone como `AIRFLOW_VAR_KAGGLE_API_TOKEN`, que
@@ -102,6 +105,24 @@ docker compose up -d --no-deps airflow-apiserver airflow-scheduler airflow-dag-p
 
 Un `docker compose restart` no actualiza las variables de entorno.
 
+Para probar esta branch por primera vez o después de cambios de dependencias,
+reconstruir y levantar el stack (también funciona desde PowerShell):
+
+```console
+docker compose up -d --build
+```
+
+Después, ejecutar manualmente `download_dataset` y, cuando termine,
+`phishing_training`. El entrenamiento encuentra automáticamente el último CSV;
+no hace falta copiarlo ni renombrarlo. Probar `POST /predict` desde
+`http://localhost:8800/docs`. El reentrenamiento requiere que ya exista un
+`champion` y puede ejecutarse después.
+
+El servidor usa MLflow 3.17.0 y los clientes de Airflow y FastAPI usan 2.22.5.
+Airflow y FastAPI comparten los rangos de las dependencias de los modelos.
+La construcción de Airflow valida las dependencias con `pip check` y excluye
+los providers de Google y Snowflake, que este proyecto no utiliza.
+
 ### Comandos
 * Para prenderlo:
 ```console
@@ -111,7 +132,7 @@ $ ./setup.sh
 ```console
 ./setup.sh --stop
 ```
-* Para destruir todo:
+* Para destruir todo (borra también los volúmenes con datasets y modelos):
 ```console
 ./setup.sh --destroy
 ```
