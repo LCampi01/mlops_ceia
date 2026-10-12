@@ -322,7 +322,7 @@ def phishing_training():
                 best = study.best_value
                 recent = [t.value for t in study.trials[-patience:] if t.value is not None]
                 if recent and max(recent) < best:
-                    raise optuna.exceptions.StopStudyError
+                    study.stop()
 
             study = optuna.create_study(direction="maximize")
             study.optimize(
