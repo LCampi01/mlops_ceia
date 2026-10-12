@@ -13,6 +13,7 @@ MODEL_NAME = "phishing_detector"
 ML_REQUIREMENTS = [
     "boto3~=1.34",
     "mlflow[extras]==2.22.5",
+    "optuna==4.3.0",
     "scipy>=1.18.0",
     "xgboost>=3.3.0",
     "scikit-learn>=1.6,<1.7",
@@ -29,8 +30,12 @@ ML_REQUIREMENTS = [
     # Trimestres calendario: enero, abril, julio y octubre, a las 00:00 UTC.
     start_date=datetime(2026, 10, 1, tzinfo=timezone.utc),
     default_args={"owner": "mlops_team", "retries": 0},
-    params={"simular_comparacion": Param(False, type="boolean",
-            description="Demo del TP: sumar ruido al F1 de selección para probar distintos ganadores")},
+    params={
+        "simular_comparacion": Param(False, type="boolean",
+            description="Demo del TP: sumar ruido al F1 de selección para probar distintos ganadores"),
+        "n_trials": Param(30, type="integer", minimum=1,
+            description="Número de trials de Optuna por modelo"),
+    },
     render_template_as_native_obj=True,
     description="Prepara correos, compara tres modelos y registra el mejor en MLflow.",
 )
@@ -177,7 +182,7 @@ def phishing_training():
     @task.virtualenv(
         requirements=ML_REQUIREMENTS,
         system_site_packages=True,
-        execution_timeout=timedelta(minutes=30),
+        execution_timeout=timedelta(minutes=90),
     )
     def entrenar_modelo(
         model_name: str,
@@ -185,6 +190,7 @@ def phishing_training():
         bucket: str,
         experiment_name: str,
         simular_comparacion: bool,
+        n_trials: int,
         run_id: str,
     ) -> dict:
         import os
@@ -201,9 +207,12 @@ def phishing_training():
         from sklearn.linear_model import LogisticRegression
         from sklearn.naive_bayes import MultinomialNB
         from sklearn.metrics import ConfusionMatrixDisplay, f1_score, precision_score, recall_score
+        from sklearn.model_selection import cross_val_score, StratifiedKFold
         from sklearn.pipeline import Pipeline
         from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
         from xgboost import XGBClassifier
+        import optuna
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
 
         s3 = boto3.client("s3")
         partitions = {}
@@ -242,39 +251,76 @@ def phishing_training():
                 })
             return pd.DataFrame(rows, index=X.index)
 
-        classifiers = {
-            "naive_bayes": MultinomialNB(),
-            "logistic_regression": LogisticRegression(max_iter=1000, solver="liblinear", random_state=42),
-            "xgboost": XGBClassifier(
-                n_estimators=200, max_depth=6, learning_rate=0.05, subsample=0.9,
-                objective="binary:logistic", eval_metric="logloss", random_state=42, n_jobs=1,
-            ),
-        }
-        classifier = classifiers[model_name]
-
-        transformers = [("text", TfidfVectorizer(max_features=5000, stop_words="english"), "text")]
-        if model_name != "naive_bayes":
-            transformers.extend([
-                ("binary", "passthrough", ["has_link", "domain_dot_high", "has_suspicious_tags"]),
-                ("category", OneHotEncoder(handle_unknown="ignore"), ["words_count_cat"]),
-                ("numeric", StandardScaler(with_mean=False), ["imperative_verbs_count", "pronoun_density", "urgency_markers_count"]),
+        def construir_pipeline(trial):
+            tfidf_max_features = trial.suggest_int("tfidf_max_features", 1000, 10000, step=1000)
+            tfidf = TfidfVectorizer(max_features=tfidf_max_features, stop_words="english")
+            if model_name == "naive_bayes":
+                alpha = trial.suggest_float("alpha", 1e-3, 10.0, log=True)
+                classifier = MultinomialNB(alpha=alpha)
+                transformers = [("text", tfidf, "text")]
+            elif model_name == "logistic_regression":
+                C = trial.suggest_float("C", 1e-3, 100.0, log=True)
+                classifier = LogisticRegression(C=C, max_iter=1000, solver="liblinear", random_state=42)
+                transformers = [
+                    ("text", tfidf, "text"),
+                    ("binary", "passthrough", ["has_link", "domain_dot_high", "has_suspicious_tags"]),
+                    ("category", OneHotEncoder(handle_unknown="ignore"), ["words_count_cat"]),
+                    ("numeric", StandardScaler(with_mean=False), ["imperative_verbs_count", "pronoun_density", "urgency_markers_count"]),
+                ]
+            else:
+                classifier = XGBClassifier(
+                    n_estimators=trial.suggest_int("n_estimators", 50, 400),
+                    max_depth=trial.suggest_int("max_depth", 3, 10),
+                    learning_rate=trial.suggest_float("learning_rate", 1e-3, 0.3, log=True),
+                    subsample=trial.suggest_float("subsample", 0.5, 1.0),
+                    colsample_bytree=trial.suggest_float("colsample_bytree", 0.5, 1.0),
+                    objective="binary:logistic", eval_metric="logloss", random_state=42, n_jobs=1,
+                )
+                transformers = [
+                    ("text", tfidf, "text"),
+                    ("binary", "passthrough", ["has_link", "domain_dot_high", "has_suspicious_tags"]),
+                    ("category", OneHotEncoder(handle_unknown="ignore"), ["words_count_cat"]),
+                    ("numeric", StandardScaler(with_mean=False), ["imperative_verbs_count", "pronoun_density", "urgency_markers_count"]),
+                ]
+            return Pipeline([
+                ("attributes", FunctionTransformer(extraer_atributos, kw_args={"q1": q1, "q3": q3})),
+                ("features", ColumnTransformer(transformers, sparse_threshold=1.0)),
+                ("classifier", classifier),
             ])
-        model = Pipeline([
-            ("attributes", FunctionTransformer(extraer_atributos, kw_args={"q1": q1, "q3": q3})),
-            ("features", ColumnTransformer(transformers, sparse_threshold=1.0)),
-            ("classifier", classifier),
-        ])
 
         mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
         mlflow.set_experiment(experiment_name)
 
         with mlflow.start_run(run_name=model_name, tags={"airflow_run_id": run_id}) as run:
             mlflow.set_tag("selection_mode", "simulation" if simular_comparacion else "real")
-            mlflow.log_params(classifier.get_params())
-            mlflow.log_param("tfidf_max_features", 5000)
-            mlflow.log_param("train_s3_key", keys["train"])
-            model.fit(X_train, y_train)
-            predictions = model.predict(X_val)
+
+            def objective(trial):
+                pipeline = construir_pipeline(trial)
+                # La búsqueda se hace con CV sobre train; validación queda intacta.
+                scores = cross_val_score(
+                    pipeline, X_train, y_train,
+                    cv=StratifiedKFold(n_splits=3, shuffle=True, random_state=42),
+                    scoring="f1", n_jobs=1,
+                )
+                cv_f1 = float(scores.mean())
+                print(f"Ejecutando {trial.number} para el modelo {model_name} con params={trial.params}")
+                with mlflow.start_run(run_name=f"{model_name}_trial_{trial.number}",
+                                      nested=True, tags={"airflow_run_id": run_id}):
+                    mlflow.log_params(trial.params)
+                    mlflow.log_metric("cv_f1", cv_f1)
+                return cv_f1
+
+            study = optuna.create_study(direction="maximize")
+            study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+            print(f"{model_name}: mejor trial={study.best_trial.number}, CV F1={study.best_value:.4f}, "
+                  f"params={study.best_params}")
+
+            # Reentrenar con los mejores hiperparámetros sobre todo el conjunto train.
+            best_pipeline = construir_pipeline(study.best_trial)
+            mlflow.log_params(study.best_params)
+            mlflow.log_metric("best_cv_f1", study.best_value)
+            best_pipeline.fit(X_train, y_train)
+            predictions = best_pipeline.predict(X_val)
             f1 = f1_score(y_val, predictions, zero_division=0)
             # Solo para el TP: variar la selección sin modificar la métrica real.
             noise = random.uniform(-0.05, 0.05) if simular_comparacion else 0.0
@@ -290,7 +336,7 @@ def phishing_training():
             mlflow.log_figure(plot.figure_, "confusion_matrix.png")
             plt.close(plot.figure_)
             # Incluye preprocesamiento: permite predecir desde el texto original.
-            mlflow.sklearn.log_model(model, "model", input_example=X_train.head(2))
+            mlflow.sklearn.log_model(best_pipeline, "model", input_example=X_train.head(2))
             print(f"{model_name}: F1 real={f1:.4f}, F1 selección={selection_f1:.4f}, simulación={simular_comparacion}")
             return {"name": model_name, "f1": float(f1), "selection_f1": selection_f1,
                     "simulated": simular_comparacion, "run_id": run.info.run_id}
@@ -353,6 +399,7 @@ def phishing_training():
         bucket=BUCKET,
         experiment_name=EXPERIMENT_NAME,
         simular_comparacion="{{ params.simular_comparacion }}",
+        n_trials="{{ params.n_trials }}",
         run_id="{{ run_id }}",
     )
     calcular_baseline(
