@@ -35,6 +35,10 @@ ML_REQUIREMENTS = [
             description="Demo del TP: sumar ruido al F1 de selección para probar distintos ganadores"),
         "n_trials": Param(30, type="integer", minimum=1,
             description="Número de trials de Optuna por modelo"),
+        "patience": Param(10, type="integer", minimum=1,
+            description="Trials consecutivos sin mejora antes de detener la búsqueda"),
+        "min_trials": Param(10, type="integer", minimum=1,
+            description="Mínimo de trials antes de que el early stopping pueda activarse"),
     },
     render_template_as_native_obj=True,
     description="Prepara correos, compara tres modelos y registra el mejor en MLflow.",
@@ -191,6 +195,8 @@ def phishing_training():
         experiment_name: str,
         simular_comparacion: bool,
         n_trials: int,
+        patience: int,
+        min_trials: int,
         run_id: str,
     ) -> dict:
         import os
@@ -310,10 +316,26 @@ def phishing_training():
                     mlflow.log_metric("cv_f1", cv_f1)
                 return cv_f1
 
+            def early_stopping_callback(study, trial):
+                if len(study.trials) < min_trials:
+                    return
+                best = study.best_value
+                recent = [t.value for t in study.trials[-patience:] if t.value is not None]
+                if recent and max(recent) < best:
+                    raise optuna.exceptions.StopStudyError
+
             study = optuna.create_study(direction="maximize")
-            study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
-            print(f"{model_name}: mejor trial={study.best_trial.number}, CV F1={study.best_value:.4f}, "
+            study.optimize(
+                objective,
+                n_trials=n_trials,
+                callbacks=[early_stopping_callback],
+                show_progress_bar=False,
+            )
+            trials_run = len(study.trials)
+            print(f"{model_name}: trials ejecutados={trials_run}/{n_trials}, "
+                  f"mejor trial={study.best_trial.number}, CV F1={study.best_value:.4f}, "
                   f"params={study.best_params}")
+            mlflow.log_metric("optuna_trials_run", trials_run)
 
             # Reentrenar con los mejores hiperparámetros sobre todo el conjunto train.
             best_pipeline = construir_pipeline(study.best_trial)
@@ -400,6 +422,8 @@ def phishing_training():
         experiment_name=EXPERIMENT_NAME,
         simular_comparacion="{{ params.simular_comparacion }}",
         n_trials="{{ params.n_trials }}",
+        patience="{{ params.patience }}",
+        min_trials="{{ params.min_trials }}",
         run_id="{{ run_id }}",
     )
     calcular_baseline(
