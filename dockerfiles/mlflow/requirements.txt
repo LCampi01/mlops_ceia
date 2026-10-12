@@ -1,8 +1,7 @@
 boto3
 cryptography
 matplotlib
-mlflow[auth]
-mlflow[extras]
+mlflow[auth,extras]==3.17.0
 numpy
 pandas
 psycopg2-binary

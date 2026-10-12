@@ -1,73 +1,73 @@
-# train_pipeline.py
-from datetime import datetime
-import os
-import joblib
-import pandas as pd
-from scipy.sparse import load_npz, hstack
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
-from xgboost import XGBClassifier
+"""Reentrenamiento del modelo elegido en MLflow, sin fijar un clasificador."""
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # Ruta de la carpeta donde vive este script (/opt/airflow/dags)
-DATASETS_DIR = os.path.join(BASE_DIR, 'datasets')       # Apunta a /opt/airflow/dags/datasets
-MODELS_DIR = os.path.join(BASE_DIR, 'models')           # Guarda en /opt/airflow/dags/models
 
-def run_training_pipeline():
-    os.makedirs(MODELS_DIR, exist_ok=True)
-    
-    # 1. Carga de datos
-    X_train = load_npz(os.path.join(DATASETS_DIR, 'X_train.npz'))
-    X_test = load_npz(os.path.join(DATASETS_DIR, 'X_test.npz'))
-    X_extra_train = pd.read_csv(os.path.join(DATASETS_DIR, 'X_extra_train.csv'))
-    X_extra_test = pd.read_csv(os.path.join(DATASETS_DIR, 'X_extra_test.csv'))
-    y_train = pd.read_csv(os.path.join(DATASETS_DIR, 'y_train.csv'))['label']
-    y_test = pd.read_csv(os.path.join(DATASETS_DIR, 'y_test.csv'))['label']
+def run_training_pipeline(run_id):
+    import os
+    import boto3
+    import mlflow
+    import mlflow.sklearn
+    import pandas as pd
+    from mlflow.exceptions import MlflowException
+    from sklearn.base import clone
+    from sklearn.metrics import f1_score, precision_score, recall_score
+    from phishing_training_dag import BUCKET, MODEL_NAME, preparar_datos
 
-    # 2. Preprocesamiento
-    ohe = OneHotEncoder(drop='first', handle_unknown='ignore')
-    scaler_num = StandardScaler(with_mean=False)
-    scaler_tfidf = StandardScaler(with_mean=False)
+    # Resolver el alias una vez y trabajar con esa versión durante toda la ejecución.
+    mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
+    client = mlflow.MlflowClient()
+    try:
+        registered = client.get_registered_model(MODEL_NAME)
+    except MlflowException as error:
+        if error.error_code != "RESOURCE_DOES_NOT_EXIST":
+            raise
+        raise ValueError("Primero ejecutá phishing_training para crear el champion") from error
+    if "champion" not in registered.aliases:
+        raise ValueError("Asigná el alias champion a una versión de phishing_detector en MLflow")
+    champion_version = registered.aliases["champion"]
+    champion = mlflow.sklearn.load_model(f"models:/{MODEL_NAME}/{champion_version}")
 
-    tf = ColumnTransformer(transformers=[
-        ('bin', 'passthrough', ['has_link', 'domain_dot_high', 'has_suspicious_tags']),
-        ('cat', ohe, ['words_count_cat']),
-        ('num', scaler_num, ['imperative_verbs_count', 'pronoun_density', 'urgency_markers_count'])
-    ], remainder='drop')
+    # clone conserva el algoritmo e hiperparámetros, pero borra el aprendizaje previo.
+    model = clone(champion)
+    classifier = model.named_steps["classifier"]
+    model_name = type(classifier).__name__
+    print(f"Reentrenando {model_name}, champion versión {champion_version}")
 
-    X_train = scaler_tfidf.fit_transform(X_train)
-    X_test = scaler_tfidf.transform(X_test)
+    # Reutilizar la preparación del otro DAG sobre el CSV actual de RustFS.
+    keys = preparar_datos(f"retrain/{run_id}")
+    s3 = boto3.client("s3")
+    partitions = {}
+    for name in ["train", "validation", "test"]:
+        response = s3.get_object(Bucket=BUCKET, Key=keys[name])
+        try:
+            partitions[name] = pd.read_csv(response["Body"], keep_default_na=False)
+        finally:
+            response["Body"].close()
+    train = partitions["train"]
+    q1, q3 = train.email_text.str.split().str.len().quantile([0.25, 0.75])
+    model.set_params(attributes__kw_args={"q1": q1, "q3": q3})
 
-    X_extra_train = tf.fit_transform(X_extra_train)
-    X_extra_test = tf.transform(X_extra_test)
+    mlflow.set_experiment("phishing-retraining")
+    with mlflow.start_run(run_name=model_name, tags={
+        "airflow_run_id": run_id, "champion_version": str(champion_version),
+    }) as run:
+        mlflow.log_params(classifier.get_params())
+        mlflow.log_param("train_s3_key", keys["train"])
+        # Se vuelven a ajustar TF-IDF, encoders, escaladores y clasificador.
+        model.fit(train[["email_text"]], train.label)
+        for name in ["validation", "test"]:
+            partition = partitions[name]
+            predictions = model.predict(partition[["email_text"]])
+            metrics = {
+                f"{name}_f1": f1_score(partition.label, predictions, zero_division=0),
+                f"{name}_precision": precision_score(partition.label, predictions, zero_division=0),
+                f"{name}_recall": recall_score(partition.label, predictions, zero_division=0),
+            }
+            mlflow.log_metrics(metrics)
+            print(metrics)
+        mlflow.sklearn.log_model(model, "model", input_example=train[["email_text"]].head(2))
+        model_uri = f"runs:/{run.info.run_id}/model"
 
-    X_train_final = hstack([X_train, X_extra_train])
-    X_test_final = hstack([X_test, X_extra_test])
-
-    # 3. Entrenamiento
-    xgb_model = XGBClassifier(
-        objective='binary:logistic',
-        eval_metric='logloss',
-        random_state=42,
-        n_estimators=200,
-        max_depth=6,
-        learning_rate=0.05,
-        subsample=0.9,
-        reg_lambda=1
-    )
-
-    xgb_model.fit(X_train_final, y_train)
-
-    # 4. Evaluación básica
-    y_pred = xgb_model.predict(X_test_final)
-    f1 = f1_score(y_test, y_pred)
-    print(f"Entrenamiento completado. F1-Score: {f1:.4f}")
-
-    # 5. Exportar artefactos para la API
-    joblib.dump(scaler_tfidf, f'{MODELS_DIR}/scaler_tfidf.joblib')
-    joblib.dump(tf, f'{MODELS_DIR}/column_transformer.joblib')
-    joblib.dump(xgb_model, f'{MODELS_DIR}/xgb_model.joblib')
-    print("Artefactos guardados exitosamente.")
-
-if __name__ == '__main__':
-    run_training_pipeline()
+    version = mlflow.register_model(model_uri, MODEL_NAME)
+    client.set_registered_model_alias(MODEL_NAME, "challenger", version.version)
+    print(f"Nueva versión {version.version}. El champion sigue siendo {champion_version}.")
+    return {"name": model_name, "version": str(version.version), "model_uri": model_uri}
