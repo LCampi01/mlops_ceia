@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phishing Detector – Opciones</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      font-family: "Google Sans", Roboto, Arial, sans-serif;
+      background: #f8f9fa;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+    }
+
+    .container {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.10);
+      padding: 36px 40px 32px;
+      margin: 48px 16px;
+      width: 100%;
+      max-width: 480px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .header img {
+      width: 40px;
+      height: 40px;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      font-weight: 600;
+      color: #202124;
+      margin: 0;
+    }
+
+    .header p {
+      font-size: 13px;
+      color: #5f6368;
+      margin: 2px 0 0;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: #3c4043;
+      margin-bottom: 6px;
+    }
+
+    .field {
+      margin-bottom: 22px;
+    }
+
+    input[type="text"],
+    input[type="url"],
+    input[type="password"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      font-size: 14px;
+      color: #202124;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    input:focus {
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 3px rgba(26,115,232,0.15);
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #80868b;
+      margin-top: 5px;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    button {
+      padding: 9px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: filter 0.15s;
+    }
+
+    button:hover { filter: brightness(0.93); }
+
+    #btn-save {
+      background: #1a73e8;
+      color: #fff;
+    }
+
+    #btn-reset {
+      background: #e8eaed;
+      color: #202124;
+    }
+
+    #status {
+      font-size: 13px;
+      color: #137333;
+      font-weight: 500;
+      display: none;
+    }
+
+    #status.error {
+      color: #c5221f;
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid #e8eaed;
+      margin: 24px 0;
+    }
+
+    .info-box {
+      background: #e8f0fe;
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-size: 13px;
+      color: #1a73e8;
+      line-height: 1.6;
+    }
+
+    .info-box strong { color: #174ea6; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="icons/icon48.png" alt="Phishing Detector icon" />
+      <div>
+        <h1>Phishing Detector</h1>
+        <p>Configuración de la extensión</p>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="api-url">URL de la API</label>
+      <input
+        type="url"
+        id="api-url"
+        placeholder="http://localhost:8800/"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <p class="hint">
+        URL base del servidor FastAPI. Debe terminar con <code>/</code>.<br>
+        El endpoint utilizado será <code>{URL}predictions</code>.
+      </p>
+    </div>
+
+    <div class="field">
+      <label for="api-key">API Key <span style="font-weight:400;color:#80868b">(opcional)</span></label>
+      <input
+        type="password"
+        id="api-key"
+        placeholder="Dejá en blanco si la API no requiere autenticación"
+        autocomplete="off"
+      />
+      <p class="hint">
+        Si está configurada, se envía como cabecera <code>X-API-Key</code>.
+      </p>
+    </div>
+
+    <div class="actions">
+      <button id="btn-save">Guardar</button>
+      <button id="btn-reset">Restablecer valores</button>
+      <span id="status"></span>
+    </div>
+
+    <hr class="divider" />
+
+    <div class="info-box">
+      <strong>¿Cómo usar la extensión?</strong><br>
+      1. Abrí un correo en Gmail.<br>
+      2. Seleccioná el texto que querés analizar.<br>
+      3. Hacé clic derecho y elegí <strong>"Detectar phishing"</strong>.<br>
+      4. El resultado aparecerá en una ventana emergente.
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
