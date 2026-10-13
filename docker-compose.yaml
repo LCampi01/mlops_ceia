@@ -192,6 +192,7 @@ services:
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - MLFLOW_TRACKING_USERNAME=secret-user
       - MLFLOW_TRACKING_PASSWORD=${MLFLOW_AUTH_ADMIN_PASSWORD}
+      - DATABASE_URL=postgresql://airflow:${PG_PASSWORD}@postgres/fastapi
     command: >
       uvicorn app:app 
       --host 0.0.0.0
@@ -398,4 +399,5 @@ volumes:
 configs:
   mlflow.sql:
     content: |
-      CREATE DATABASE mlflow_db
+      CREATE DATABASE mlflow_db;
+      CREATE DATABASE fastapi;
