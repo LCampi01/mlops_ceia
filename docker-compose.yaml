@@ -65,14 +65,35 @@ services:
       - POSTGRES_PORT=5432
     volumes:
       - db_data:/var/lib/postgresql/data
-    configs:
-      - source: mlflow.sql
-        target: /docker-entrypoint-initdb.d/mlflow.sql
     healthcheck:
       test: ["CMD", "pg_isready", "-p", "5432", "-U", "airflow"]
       interval: 60s
       timeout: 20s
       retries: 3
+
+  create_databases:
+    image: postgres:13
+    container_name: postgres_create_databases
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+    environment:
+      - PGHOST=postgres
+      - PGUSER=airflow
+      - PGPASSWORD=${PG_PASSWORD}
+      - PGDATABASE=airflow
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        for db in mlflow_db fastapi; do
+          if psql -tAc "SELECT 1 FROM pg_database WHERE datname = '$$db'" | grep -q 1; then
+            echo "La base $$db ya existe"
+          else
+            psql -c "CREATE DATABASE $$db"
+          fi
+        done
 
   redis:
     image: valkey/valkey:8.1-bookworm
@@ -140,8 +161,8 @@ services:
     image: mlflow
     container_name: mlflow
     depends_on:
-      postgres:
-        condition: service_healthy
+      create_databases:
+        condition: service_completed_successfully
     ports:
       - "5000:5000"
     networks:
@@ -175,6 +196,8 @@ services:
     image: backend_fastapi
     container_name: fastapi
     depends_on:
+      create_databases:
+        condition: service_completed_successfully
       mlflow:
         condition: service_healthy
       airflow-apiserver:
@@ -395,9 +418,3 @@ networks:
 volumes:
   db_data:
   minio_data:
-
-configs:
-  mlflow.sql:
-    content: |
-      CREATE DATABASE mlflow_db;
-      CREATE DATABASE fastapi;

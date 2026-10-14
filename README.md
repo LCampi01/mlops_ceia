@@ -86,8 +86,12 @@ Recibe el texto del correo en `POST /predictions`, por ejemplo:
 
 Devuelve HTTP 201 con la clasificación, la probabilidad de phishing, la versión
 utilizada y el `prediction_id` asignado. El header `Location` apunta a
-`/prediction/{prediction_id}`. Cada predicción se persiste en una base de datos
+`/predictions/{prediction_id}`. Cada predicción se persiste en una base de datos
 PostgreSQL junto con el texto del correo y los resultados.
+
+`GET /predictions/{prediction_id}` devuelve la predicción guardada, con su
+feedback y fecha de creación, sin el texto del correo. Si no existe, devuelve
+HTTP 404.
 
 Una vez recibida la predicción, se puede enviar feedback sobre su corrección con
 `POST /predictions/{prediction_id}/feedback`:

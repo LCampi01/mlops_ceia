@@ -1,3 +1,7 @@
+# 14/10/2026
+- Las bases `mlflow_db` y `fastapi` se crean en cada arranque si faltan, también con un volumen de Postgres existente.
+- Endpoint `GET /predictions/{prediction_id}` y header `Location` corregido para apuntar a él.
+
 # 12/10/2026
 - Búsqueda de hiperparámetros con Optuna (TPE, 3-fold CV sobre train) por modelo, con early stopping configurable por `patience` y `min_trials`. Se registran `best_cv_f1` y `optuna_trials_run` en MLflow.
 - Endpoint `POST /predictions/{prediction_id}/feedback` para registrar si la predicción fue correcta (`OK`) o incorrecta (`NO`).

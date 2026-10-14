@@ -120,7 +120,7 @@ def predict(data: EmailInput, response: Response):
             model_version=version,
         ))
 
-    response.headers["Location"] = f"/prediction/{prediction_id}"
+    response.headers["Location"] = f"/predictions/{prediction_id}"
     return {
         "prediction_id": prediction_id,
         "prediction_code": prediction,
@@ -128,6 +128,27 @@ def predict(data: EmailInput, response: Response):
         "phishing_probability": round(probability, 4),
         "model_version": version,
     }
+
+
+@app.get("/predictions/{prediction_id}")
+def get_prediction(prediction_id: str):
+    # Devuelve el resultado y su feedback.
+    columns = [
+        predictions_table.c.id.label("prediction_id"),
+        predictions_table.c.prediction_code,
+        predictions_table.c.label,
+        predictions_table.c.phishing_probability,
+        predictions_table.c.model_version,
+        predictions_table.c.feedback,
+        predictions_table.c.created_at,
+    ]
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa.select(*columns).where(predictions_table.c.id == prediction_id)
+        ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Predicción no encontrada")
+    return dict(row)
 
 
 @app.post("/predictions/{prediction_id}/feedback", status_code=204)
