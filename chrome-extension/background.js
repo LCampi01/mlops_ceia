@@ -41,14 +41,21 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   chrome.tabs.sendMessage(tab.id, { type: "PHISHING_LOADING" });
 
   // Read settings from storage.
-  const { apiUrl, apiKey } = await chrome.storage.sync.get({
+  const { apiUrl, apiKey } = await chrome.storage.local.get({
     apiUrl: DEFAULT_API_URL,
     apiKey: "",
   });
 
+  if (!apiKey) {
+    chrome.tabs.sendMessage(tab.id, {
+      type: "PHISHING_ERROR",
+      error: "Configurá la API Key en las opciones de la extensión.",
+    });
+    return;
+  }
+
   const endpoint = buildEndpoint(apiUrl);
-  const headers = { "Content-Type": "application/json" };
-  if (apiKey) headers["X-API-Key"] = apiKey;
+  const headers = { "Content-Type": "application/json", "X-API-Key": apiKey };
 
   let payload;
   try {
@@ -57,6 +64,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       headers,
       body: JSON.stringify({ email_text: selectedText }),
     });
+
+    if (response.status === 401) {
+      throw new Error("API Key inválida. Revisala en las opciones de la extensión.");
+    }
 
     if (!response.ok) {
       const errorBody = await response.text();

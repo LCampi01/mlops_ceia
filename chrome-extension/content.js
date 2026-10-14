@@ -256,7 +256,7 @@
 
       try {
         const { apiUrl, apiKey } = await new Promise((resolve) =>
-          chrome.storage.sync.get({ apiUrl: "http://localhost:8800/", apiKey: "" }, resolve)
+          chrome.storage.local.get({ apiUrl: "http://localhost:8800/", apiKey: "" }, resolve)
         );
         const base = apiUrl.replace(/\/?$/, "/");
         const endpoint = `${base}predictions/${result.prediction_id}/feedback`;

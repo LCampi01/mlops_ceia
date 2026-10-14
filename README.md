@@ -78,6 +78,11 @@ manualmente el alias `champion` en MLflow. Con `simular_comparacion=false`, tamb
 en las ejecuciones programadas, se elige únicamente por el F1 real.
 
 ### FastAPI
+Todos los endpoints, salvo `GET /`, exigen la cabecera `X-API-Key` con el valor de
+`API_KEY` de `.env`. Sin ella, o con una clave incorrecta, devuelven HTTP 401.
+La clave se genera con `openssl rand -hex 32` y debe tener al menos 32
+caracteres; si falta, la API no arranca.
+
 Recibe el texto del correo en `POST /predictions`, por ejemplo:
 
 ```json
@@ -105,7 +110,18 @@ Devuelve HTTP 204. Si el `prediction_id` no existe, devuelve HTTP 404.
 
 Usa el `champion` de MLflow y carga la nueva versión cuando cambia ese alias.
 Si el champion no está disponible, devuelve HTTP 503.
-La documentación interactiva está en `http://localhost:8800/docs`.
+La documentación interactiva está en `http://localhost:8800/docs`; para probar
+los endpoints, cargar la clave con el botón **Authorize**. Desde la terminal:
+
+```console
+curl -X POST http://localhost:8800/predictions \
+  -H "X-API-Key: <API_KEY>" -H "Content-Type: application/json" \
+  -d '{"email_text": "Please verify your account immediately"}'
+```
+
+Para cambiar la clave, editar `API_KEY` en `.env`, aplicar el cambio con
+`docker compose up -d --no-deps fastapi` (un `restart` no recarga las variables)
+y actualizarla en la extensión de Chrome.
 
 ## Ejecución local
 
@@ -178,3 +194,6 @@ $ ./setup.sh
 ### MLflow
 * user: `secret-user`
 * pass: `MLFLOW_AUTH_ADMIN_PASSWORD` de `.env`
+
+### FastAPI
+* cabecera `X-API-Key`: `API_KEY` de `.env`
