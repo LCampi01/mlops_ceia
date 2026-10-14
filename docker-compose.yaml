@@ -216,6 +216,7 @@ services:
       - MLFLOW_TRACKING_USERNAME=secret-user
       - MLFLOW_TRACKING_PASSWORD=${MLFLOW_AUTH_ADMIN_PASSWORD}
       - DATABASE_URL=postgresql://airflow:${PG_PASSWORD}@postgres/fastapi
+      - API_KEY=${API_KEY:-}
     command: >
       uvicorn app:app 
       --host 0.0.0.0

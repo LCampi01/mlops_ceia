@@ -1,12 +1,14 @@
 """Predicciones con el pipeline marcado como champion en MLflow."""
 import logging
 import os
+import secrets
 import uuid
 from contextlib import asynccontextmanager
 from threading import Lock
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Response, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 import mlflow
 import mlflow.sklearn
 import pandas as pd
@@ -17,6 +19,10 @@ import sqlalchemy as sa
 DB_URL = os.environ.get("DATABASE_URL")
 if DB_URL is None:
     raise ValueError("DATABASE_URL environment variable is not set")
+
+API_KEY = os.environ.get("API_KEY", "")
+if len(API_KEY) < 32:
+    raise ValueError("API_KEY debe estar definida y tener al menos 32 caracteres")
 
 engine = sa.create_engine(DB_URL, pool_pre_ping=True)
 metadata = sa.MetaData()
@@ -60,6 +66,17 @@ model_cache = None
 version_cache = None
 model_lock = Lock()
 logger = logging.getLogger(__name__)
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def verificar_api_key(api_key: str | None = Security(api_key_header)) -> None:
+    # compare_digest evita filtrar la clave por diferencias de tiempo.
+    if not api_key or not secrets.compare_digest(api_key.encode(), API_KEY.encode()):
+        raise HTTPException(
+            status_code=401,
+            detail="API key inválida o ausente",
+            headers={"WWW-Authenticate": "APIKey"},
+        )
 
 
 class EmailInput(BaseModel):
@@ -90,7 +107,7 @@ def home():
     return {"status": "online", "message": "API de predicción de phishing"}
 
 
-@app.post("/predictions", status_code=201)
+@app.post("/predictions", status_code=201, dependencies=[Depends(verificar_api_key)])
 def predict(data: EmailInput, response: Response):
     try:
         model, version = cargar_champion()
@@ -130,7 +147,7 @@ def predict(data: EmailInput, response: Response):
     }
 
 
-@app.get("/predictions/{prediction_id}")
+@app.get("/predictions/{prediction_id}", dependencies=[Depends(verificar_api_key)])
 def get_prediction(prediction_id: str):
     # Devuelve el resultado y su feedback.
     columns = [
@@ -151,7 +168,8 @@ def get_prediction(prediction_id: str):
     return dict(row)
 
 
-@app.post("/predictions/{prediction_id}/feedback", status_code=204)
+@app.post("/predictions/{prediction_id}/feedback", status_code=204,
+          dependencies=[Depends(verificar_api_key)])
 def feedback(prediction_id: str, data: FeedbackInput):
     with engine.begin() as conn:
         result = conn.execute(

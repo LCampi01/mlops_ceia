@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 airflow/config/
 airflow/dags/__pycache__/
 airflow/logs/

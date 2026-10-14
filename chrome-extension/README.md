@@ -12,7 +12,7 @@ Chrome extension that integrates with the **Phishing Detector FastAPI** service 
 | **Right-click → Detect** | Select any text in an email, right-click, and choose **"Detectar phishing"**. |
 | **Result modal** | Shows whether the text is *Phishing* or *Legítimo*, the probability, model version, and prediction ID. |
 | **Feedback buttons** | Send 👍 *Correcto* / 👎 *Incorrecto* feedback directly to the API (`POST /predictions/{id}/feedback`). |
-| **Configurable** | API URL and optional API Key are stored in `chrome.storage.sync` (synced across devices). |
+| **Configurable** | API URL and API Key are stored in `chrome.storage.local` (only in this browser). |
 
 ---
 
@@ -50,9 +50,9 @@ chrome-extension/
 | Setting | Default | Description |
 |---|---|---|
 | **API URL** | `http://localhost:8800/` | Base URL of the FastAPI server. The extension appends `predictions` to build the full endpoint. |
-| **API Key** | *(empty)* | If set, sent as the `X-API-Key` request header. Leave blank if the API has no authentication. |
+| **API Key** | *(empty)* | **Required.** Sent as the `X-API-Key` request header. Use the `API_KEY` value from the project's `.env`. |
 
-Settings are saved with `chrome.storage.sync` and shared across Chrome profiles on the same Google account.
+Settings are saved with `chrome.storage.local`, so the API Key is not synced to the Google account.
 
 ---
 

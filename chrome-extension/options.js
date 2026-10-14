@@ -1,8 +1,8 @@
 /**
  * options.js – Settings page logic.
  *
- * Saves / restores API URL and API Key using chrome.storage.sync so that
- * settings are shared across devices when the user is signed into Chrome.
+ * Saves / restores API URL and API Key using chrome.storage.local so that
+ * the API Key stays in this browser and is not synced to the Google account.
  */
 
 const DEFAULT_API_URL = "http://localhost:8800/";
@@ -15,7 +15,7 @@ const statusEl    = document.getElementById("status");
 
 // ── Load saved settings on page open ─────────────────────────────────────────
 
-chrome.storage.sync.get({ apiUrl: DEFAULT_API_URL, apiKey: "" }, ({ apiUrl, apiKey }) => {
+chrome.storage.local.get({ apiUrl: DEFAULT_API_URL, apiKey: "" }, ({ apiUrl, apiKey }) => {
   apiUrlInput.value = apiUrl;
   apiKeyInput.value = apiKey;
 });
@@ -31,6 +31,11 @@ btnSave.addEventListener("click", () => {
     return;
   }
 
+  if (!apiKey) {
+    showStatus("La API Key no puede estar vacía.", true);
+    return;
+  }
+
   try {
     new URL(apiUrl);
   } catch {
@@ -38,7 +43,7 @@ btnSave.addEventListener("click", () => {
     return;
   }
 
-  chrome.storage.sync.set({ apiUrl, apiKey }, () => {
+  chrome.storage.local.set({ apiUrl, apiKey }, () => {
     showStatus("✓ Configuración guardada.");
   });
 });
@@ -48,7 +53,7 @@ btnSave.addEventListener("click", () => {
 btnReset.addEventListener("click", () => {
   apiUrlInput.value = DEFAULT_API_URL;
   apiKeyInput.value = "";
-  chrome.storage.sync.set({ apiUrl: DEFAULT_API_URL, apiKey: "" }, () => {
+  chrome.storage.local.set({ apiUrl: DEFAULT_API_URL, apiKey: "" }, () => {
     showStatus("✓ Valores restablecidos.");
   });
 });
