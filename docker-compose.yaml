@@ -161,7 +161,7 @@ services:
       --host 0.0.0.0
       --default-artifact-root s3://mlflow/
       --workers 1
-      --allowed-hosts "${MLFLOW_ALLOWED_HOSTS:-localhost:5000,mlflow:5000}"
+      --allowed-hosts "${MLFLOW_ALLOWED_HOSTS:-localhost:5000},mlflow:5000"
       --cors-allowed-origins "${MLFLOW_CORS_ALLOWED_ORIGINS:-http://localhost:5000}"
     healthcheck:
       test: curl -f http://$${MLFLOW_AUTH_ADMIN_USERNAME}:$${MLFLOW_AUTH_ADMIN_PASSWORD}@mlflow:5000/health || exit 1
@@ -192,6 +192,7 @@ services:
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - MLFLOW_TRACKING_USERNAME=secret-user
       - MLFLOW_TRACKING_PASSWORD=${MLFLOW_AUTH_ADMIN_PASSWORD}
+      - DATABASE_URL=postgresql://airflow:${PG_PASSWORD}@postgres/fastapi
     command: >
       uvicorn app:app 
       --host 0.0.0.0
@@ -398,4 +399,5 @@ volumes:
 configs:
   mlflow.sql:
     content: |
-      CREATE DATABASE mlflow_db
+      CREATE DATABASE mlflow_db;
+      CREATE DATABASE fastapi;

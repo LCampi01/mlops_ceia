@@ -7,7 +7,7 @@
 * José Miguel Silva Pavón (a2415)
 
 ## Objetivo
-Servir un modelo de detección de _spam_ en un stack de MLFlow / Airflow / FastAPI.
+Servir un modelo de detección de _phishing_ en un stack de MLFlow / Airflow / FastAPI.
 
 ## Arquitectura
 
@@ -16,18 +16,25 @@ Servir un modelo de detección de _spam_ en un stack de MLFlow / Airflow / FastA
 | DAG | Qué hace | Frecuencia |
 | --- | --- | --- |
 | `download_dataset` | Descarga el dataset de phishing desde Kaggle y lo guarda en RustFS como `datasets/raw/data_<uuid>.csv`. | Manual |
-| [`phishing_training`](airflow/dags/phishing_training_dag.py) | Prepara los datos, compara Naive Bayes, regresión logística y XGBoost, y registra el mejor en MLflow. | Cada 3 meses |
+| [`phishing_training`](airflow/dags/phishing_training_dag.py) | Prepara los datos, busca hiperparámetros con Optuna, compara Naive Bayes, regresión logística y XGBoost en paralelo, y registra el mejor en MLflow. | Cada 3 meses |
 | [`phishing_champion_retrain`](airflow/dags/champion_training_dag.py) | Reentrena el modelo marcado como `champion`, conservando su algoritmo e hiperparámetros. | Mensual |
 
 **Entrenamiento y comparación:** lee el CSV `data_*.csv` más reciente (por fecha
 de subida) de `s3://data/datasets/raw/`,
 limpia los correos y separa 70% para entrenamiento, 15% para validación y 15% para
-test. Calcula un baseline heurístico como referencia y entrena los tres modelos.
+test. Calcula un baseline heurístico como referencia y entrena los tres modelos
+en paralelo. Cada modelo ejecuta una búsqueda de hiperparámetros con Optuna
+(TPE, 3-fold CV sobre train) antes de ajustar el modelo final.
 Elige el de mayor F1 de validación y lo evalúa sobre test.
 
-```text
-preparar_datos → entrenar_modelos → registrar_mejor_modelo
-```
+Parámetros configurables al ejecutar manualmente:
+
+| Parámetro | Por defecto | Descripción |
+| --- | --- | --- |
+| `simular_comparacion` | `false` | Suma ruido aleatorio al F1 de selección para probar distintos ganadores |
+| `n_trials` | `30` | Número máximo de trials de Optuna por modelo |
+| `patience` | `10` | Trials consecutivos sin mejora antes de detener la búsqueda |
+| `min_trials` | `10` | Mínimo de trials antes de que el early stopping pueda activarse |
 
 **Reentrenamiento:** carga el pipeline completo del `champion`, prepara el CSV
 más reciente de esa misma ubicación en RustFS y vuelve a ajustar el
@@ -59,23 +66,40 @@ El resultado se limita al rango [0, 1] y se usa para elegir al ganador. Esto per
 que gane otro modelo aunque se use el mismo dataset; no garantiza un cambio en cada ejecución.
 
 MLflow guarda `validation_f1` con el valor real, `selection_f1` con el valor usado
-para seleccionar y `selection_noise` con la variación sorteada. Los runs y la
-versión registrada llevan `selection_mode=simulation`. El F1 de test sigue siendo
-real. Esta simulación prueba el flujo de cambio de modelos, no demuestra una mejora.
+para seleccionar, `selection_noise` con la variación sorteada, `best_cv_f1` con el
+mejor F1 de validación cruzada encontrado por Optuna y `optuna_trials_run` con la
+cantidad de trials ejecutados (puede ser menor que `n_trials` si el early stopping
+se activó). Los runs y la versión registrada llevan `selection_mode=simulation`.
+El F1 de test sigue siendo real. Esta simulación prueba el flujo de cambio de
+modelos, no demuestra una mejora.
 
 Para probar el cambio en la API, revisar el nuevo `challenger` y asignarle
 manualmente el alias `champion` en MLflow. Con `simular_comparacion=false`, también
 en las ejecuciones programadas, se elige únicamente por el F1 real.
 
 ### FastAPI
-Recibe el texto del correo en `POST /predict`, por ejemplo:
+Recibe el texto del correo en `POST /predictions`, por ejemplo:
 
 ```json
 {"email_text": "Please verify your account immediately"}
 ```
 
+Devuelve HTTP 201 con la clasificación, la probabilidad de phishing, la versión
+utilizada y el `prediction_id` asignado. El header `Location` apunta a
+`/prediction/{prediction_id}`. Cada predicción se persiste en una base de datos
+PostgreSQL junto con el texto del correo y los resultados.
+
+Una vez recibida la predicción, se puede enviar feedback sobre su corrección con
+`POST /predictions/{prediction_id}/feedback`:
+
+```json
+{"feedback": "OK"}
+```
+
+El valor debe ser `OK` (predicción correcta) o `NO` (predicción incorrecta).
+Devuelve HTTP 204. Si el `prediction_id` no existe, devuelve HTTP 404.
+
 Usa el `champion` de MLflow y carga la nueva versión cuando cambia ese alias.
-Devuelve la clasificación, la probabilidad de phishing y la versión utilizada.
 Si el champion no está disponible, devuelve HTTP 503.
 La documentación interactiva está en `http://localhost:8800/docs`.
 
@@ -114,7 +138,7 @@ docker compose up -d --build
 
 Después, ejecutar manualmente `download_dataset` y, cuando termine,
 `phishing_training`. El entrenamiento encuentra automáticamente el último CSV;
-no hace falta copiarlo ni renombrarlo. Probar `POST /predict` desde
+no hace falta copiarlo ni renombrarlo. Probar `POST /predictions` desde
 `http://localhost:8800/docs`. El reentrenamiento requiere que ya exista un
 `champion` y puede ejecutarse después.
 
