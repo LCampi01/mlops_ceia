@@ -94,7 +94,7 @@ def phishing_champion_retrain():
             rows = conn.execute(query).fetchall()
         engine.dispose()
 
-        if not rows or rows[0]["created_at"] < (pd.Timestamp.now() - pd.Timedelta(hours=24)):
+        if not rows or rows[0][3] < (pd.Timestamp.now() - pd.Timedelta(hours=24)):
             print("No hay feedback nuevo en las últimas 24 horas. Se omite el reentrenamiento.")
             return None
 
