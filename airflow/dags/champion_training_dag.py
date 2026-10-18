@@ -18,8 +18,8 @@ ML_REQUIREMENTS = [
 FEEDBACK_REQUIREMENTS = [
     "boto3~=1.34",
     "pandas>=2.2,<3",
-    "sqlalchemy>=1.4,<3",
-    "psycopg2-binary>=2.9",
+    "sqlalchemy>=2.0,<3",
+    "psycopg[binary]>=3.3.6",
 ]
 
 
