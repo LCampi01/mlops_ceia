@@ -98,7 +98,7 @@ def phishing_champion_retrain():
         requirements=["boto3~=1.34", "pandas>=2.2,<3", "scikit-learn>=1.6,<1.7"],
         system_site_packages=True,
     )
-    def preparar_datos(bucket: str, dataset_prefix: str, run_id: str, feedback_key: str) -> dict:
+    def preparar_datos(bucket: str, dataset_prefix: str, feedback_key: str, run_id: str) -> dict:
         import boto3
         import pandas as pd
         from sklearn.model_selection import train_test_split
@@ -283,8 +283,8 @@ def phishing_champion_retrain():
     keys = preparar_datos(
         bucket=BUCKET,
         dataset_prefix=DATASET_PREFIX,
-        run_id="{{ run_id }}",
         feedback_key=feedback_key,
+        run_id="{{ run_id }}",
     )
     reentrenar_champion(
         keys=keys,
