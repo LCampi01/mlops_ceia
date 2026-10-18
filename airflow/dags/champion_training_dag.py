@@ -1,4 +1,4 @@
-"""Reentrena el champion de MLflow, sea cual sea su algoritmo."""
+"""Reentrena el champion de MLflow incorporando feedback de producción."""
 from datetime import datetime, timedelta, timezone
 
 from airflow.decorators import dag, task
@@ -14,11 +14,18 @@ ML_REQUIREMENTS = [
     "pandas>=2.2,<3",
 ]
 
+FEEDBACK_REQUIREMENTS = [
+    "boto3~=1.34",
+    "pandas>=2.2,<3",
+    "sqlalchemy>=1.4,<3",
+    "psycopg2-binary>=2.9",
+]
+
 
 @dag(
     dag_id="phishing_champion_retrain",
-    description="Reentrena el champion de phishing y registra una nueva versión challenger.",
-    schedule="@monthly",  # El día 1 de cada mes a las 00:00 UTC; también admite ejecución manual.
+    description="Reentrena el champion de phishing incorporando feedback de producción.",
+    schedule="@daily",  # Cada día a las 00:00 UTC; también admite ejecución manual.
     start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
     catchup=False,
     max_active_runs=1,
@@ -27,11 +34,71 @@ ML_REQUIREMENTS = [
 def phishing_champion_retrain():
 
     @task.virtualenv(
+        task_id="recopilar_feedback",
+        requirements=FEEDBACK_REQUIREMENTS,
+        system_site_packages=True,
+    )
+    def recopilar_feedback(bucket: str, run_id: str) -> str:
+        """Obtiene predicciones con feedback de las últimas 24 horas y las sube a S3.
+
+        Lanza AirflowSkipException si no hay filas nuevas, propagando el skip
+        a preparar_datos y reentrenar_champion sin registrar un error.
+        Devuelve la clave S3 del CSV generado cuando sí hay filas nuevas.
+        """
+        import os
+        import boto3
+        import pandas as pd
+        import sqlalchemy as sa
+        from airflow.exceptions import AirflowSkipException
+
+        db_url = os.environ.get("DATABASE_URL")
+        if not db_url:
+            raise ValueError("DATABASE_URL no está definida en el entorno de Airflow")
+
+        engine = sa.create_engine(db_url, pool_pre_ping=True)
+        query = sa.text(
+            """
+            SELECT email_text,
+                   prediction_code,
+                   feedback,
+                   created_at
+            FROM   predictions
+            WHERE  feedback IS NOT NULL
+            ORDER BY created_at DESC
+            """
+        )
+        with engine.connect() as conn:
+            rows = conn.execute(query).fetchall()
+        engine.dispose()
+
+        if not rows or not rows[-1]["created_at"] >= (pd.Timestamp.now() - pd.Timedelta(hours=24)):
+            print("No hay feedback nuevo en las últimas 24 horas. Se omite el reentrenamiento.")
+            raise AirflowSkipException("Sin feedback nuevo en las últimas 24 horas")
+
+        df = pd.DataFrame(rows, columns=["email_text", "prediction_code", "feedback"])
+
+        # Se invierte la etiqueta si el feedback es negativo.
+        df["label"] = df.apply(
+            lambda r: 1 - r["prediction_code"] if r["feedback"] == "NO" else r["prediction_code"],
+            axis=1,
+        ).astype(int)
+        df = df[["email_text", "label"]].copy()
+
+        print(f"Predicciones con feedback recuperadas: {len(df)}")
+        print(df["label"].value_counts().to_dict())
+
+        key = f"retrain/{run_id}/feedback.csv"
+        s3 = boto3.client("s3")
+        s3.put_object(Bucket=bucket, Key=key, Body=df.to_csv(index=False).encode())
+        print(f"Feedback subido a s3://{bucket}/{key}")
+        return key
+
+    @task.virtualenv(
         task_id="preparar_datos",
         requirements=["boto3~=1.34", "pandas>=2.2,<3", "scikit-learn>=1.6,<1.7"],
         system_site_packages=True,
     )
-    def preparar_datos(bucket: str, dataset_prefix: str, run_id: str) -> dict:
+    def preparar_datos(bucket: str, dataset_prefix: str, run_id: str, feedback_key: str) -> dict:
         import boto3
         import pandas as pd
         from sklearn.model_selection import train_test_split
@@ -69,12 +136,38 @@ def phishing_champion_retrain():
             raise ValueError("Hay etiquetas distintas de Safe Email y Phishing Email")
         df["label"] = df["Email Type"].map(labels)
         df["email_text"] = df["Email Text"].str.strip()
+        df = df[["email_text", "label"]].copy()
+
+        # --- Considera feedback productivo ----------------------------
+        feedback_rows = 0
+        df["_source"] = "base"
+        if feedback_key:
+            response = s3.get_object(Bucket=bucket, Key=feedback_key)
+            try:
+                df_feedback = pd.read_csv(response["Body"], keep_default_na=False)
+            finally:
+                response["Body"].close()
+            if not {"email_text", "label"}.issubset(df_feedback.columns):
+                raise ValueError("El CSV de feedback debe tener las columnas email_text y label")
+            df_feedback["email_text"] = df_feedback["email_text"].str.strip()
+            df_feedback["label"] = df_feedback["label"].astype(int)
+            df["_source"] = "base"
+            df_feedback["_source"] = "feedback"
+            df = pd.concat([df, df_feedback], ignore_index=True)
+            feedback_rows = len(df_feedback)
+            print(f"Filas de feedback añadidas antes de limpiar: {feedback_rows}")
+        # ----------------------------------------------------------------------
 
         normalized = df.email_text.str.lower().str.replace(r"<[^>]*>", " ", regex=True)
         df["normalized"] = normalized.str.replace(r"[^a-z]+", " ", regex=True).str.strip()
         df = df[~df.normalized.isin(["", "empty"])].copy()
         conflicts = df.groupby("normalized").label.transform("nunique") > 1
-        df = df[~conflicts].drop_duplicates("normalized")[["email_text", "label"]]
+
+        df["_conflict"] = conflicts
+        df = df[~(df["_conflict"] & (df["_source"] == "feedback"))].copy()
+
+        remaining_conflicts = df.groupby("normalized").label.transform("nunique") > 1
+        df = df[~remaining_conflicts].drop_duplicates("normalized")[["email_text", "label"]]
         if df.label.nunique() != 2 or df.label.value_counts().min() < 10:
             raise ValueError("Se necesitan al menos 10 correos diferentes por clase")
 
@@ -86,7 +179,7 @@ def phishing_champion_retrain():
             key = f"retrain/{run_id}/{name}.csv"
             s3.put_object(Bucket=bucket, Key=key, Body=partition.to_csv(index=False).encode())
             keys[name] = key
-        print(f"Correos originales: {original_rows}; limpios: {len(df)}")
+        print(f"Correos originales: {original_rows}; feedback: {feedback_rows}; limpios tras merge: {len(df)}")
         print(f"Train: {len(train)}, validación: {len(validation)}, test: {len(test)}")
         return keys
 
@@ -183,10 +276,15 @@ def phishing_champion_retrain():
             "model_uri": model_uri,
         }
 
+    feedback_key = recopilar_feedback(
+        bucket=BUCKET,
+        run_id="{{ run_id }}",
+    )
     keys = preparar_datos(
         bucket=BUCKET,
         dataset_prefix=DATASET_PREFIX,
         run_id="{{ run_id }}",
+        feedback_key=feedback_key,
     )
     reentrenar_champion(
         keys=keys,
