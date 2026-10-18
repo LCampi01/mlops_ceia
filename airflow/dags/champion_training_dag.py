@@ -42,24 +42,43 @@ def phishing_champion_retrain():
             "API_DATABASE_URL": os.environ.get("API_DATABASE_URL")
         }
     )
-    def recopilar_feedback(bucket: str, run_id: str) -> str:
+    def recopilar_feedback(bucket: str, run_id: str) -> str | None:
         """Obtiene predicciones con feedback de las últimas 24 horas y las sube a S3.
 
-        Lanza AirflowSkipException si no hay filas nuevas, propagando el skip
-        a preparar_datos y reentrenar_champion sin registrar un error.
+        Devuelve None si no hay feedback nuevo, para que una tarea Airflow
+        normal pueda omitir el resto del DAG.
         Devuelve la clave S3 del CSV generado cuando sí hay filas nuevas.
         """
         import os
         import boto3
         import pandas as pd
         import sqlalchemy as sa
-        from airflow.exceptions import AirflowSkipException
 
         db_url = os.environ.get("API_DATABASE_URL")
         if not db_url:
             raise ValueError("API_DATABASE_URL no está definida en el entorno de Airflow")
 
         engine = sa.create_engine(db_url, pool_pre_ping=True)
+        metadata = sa.MetaData()
+        sa.Table(
+            "predictions",
+            metadata,
+            sa.Column("id", sa.String, primary_key=True),
+            sa.Column("email_text", sa.Text, nullable=False),
+            sa.Column("prediction_code", sa.Integer, nullable=False),
+            sa.Column("label", sa.String, nullable=False),
+            sa.Column("phishing_probability", sa.Float, nullable=False),
+            sa.Column("model_version", sa.String, nullable=False),
+            sa.Column(
+                "feedback",
+                sa.String,
+                sa.CheckConstraint("feedback IN ('OK', 'NO')"),
+                nullable=True,
+            ),
+            sa.Column("created_at", sa.DateTime, server_default=sa.func.now(), nullable=False),
+        )
+        metadata.create_all(engine)
+
         query = sa.text(
             """
             SELECT email_text,
@@ -75,9 +94,9 @@ def phishing_champion_retrain():
             rows = conn.execute(query).fetchall()
         engine.dispose()
 
-        if not rows or not rows[-1]["created_at"] >= (pd.Timestamp.now() - pd.Timedelta(hours=24)):
+        if not rows or rows[0]["created_at"] < (pd.Timestamp.now() - pd.Timedelta(hours=24)):
             print("No hay feedback nuevo en las últimas 24 horas. Se omite el reentrenamiento.")
-            raise AirflowSkipException("Sin feedback nuevo en las últimas 24 horas")
+            return None
 
         df = pd.DataFrame(rows, columns=["email_text", "prediction_code", "feedback"])
 
@@ -96,6 +115,15 @@ def phishing_champion_retrain():
         s3.put_object(Bucket=bucket, Key=key, Body=df.to_csv(index=False).encode())
         print(f"Feedback subido a s3://{bucket}/{key}")
         return key
+
+    @task(task_id="validar_feedback")
+    def validar_feedback(feedback_key: str | None) -> str:
+        """Omite el DAG correctamente cuando la tarea virtualenv no halló datos."""
+        from airflow.exceptions import AirflowSkipException
+
+        if not feedback_key:
+            raise AirflowSkipException("Sin feedback nuevo en las últimas 24 horas")
+        return feedback_key
 
     @task.virtualenv(
         task_id="preparar_datos",
@@ -280,10 +308,11 @@ def phishing_champion_retrain():
             "model_uri": model_uri,
         }
 
-    feedback_key = recopilar_feedback(
+    feedback_result = recopilar_feedback(
         bucket=BUCKET,
         run_id="{{ run_id }}",
     )
+    feedback_key = validar_feedback(feedback_result)
     keys = preparar_datos(
         bucket=BUCKET,
         dataset_prefix=DATASET_PREFIX,

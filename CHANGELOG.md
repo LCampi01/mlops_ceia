@@ -1,5 +1,7 @@
 # 18/10/2026
 - Reentrenamiento con feedback de usuarios por predicciones productivas.
+- El DAG `phishing_champion_retrain` crea la tabla `predictions` si falta y omite correctamente el ciclo cuando no hay feedback en las últimas 24 horas.
+- Corrección de la comprobación temporal para evaluar el feedback más reciente.
 
 # 15/10/2026
 - La API exige la cabecera `X-API-Key` con la clave `API_KEY` de `.env` en todos los endpoints salvo `GET /`.
