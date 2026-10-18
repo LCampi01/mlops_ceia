@@ -98,7 +98,7 @@ def phishing_champion_retrain():
             print("No hay feedback nuevo en las últimas 24 horas. Se omite el reentrenamiento.")
             return None
 
-        df = pd.DataFrame(rows, columns=["email_text", "prediction_code", "feedback"])
+        df = pd.DataFrame(rows, columns=["email_text", "prediction_code", "feedback", "created_at"])
 
         # Se invierte la etiqueta si el feedback es negativo.
         df["label"] = df.apply(
