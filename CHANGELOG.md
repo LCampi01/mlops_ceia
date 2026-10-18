@@ -1,3 +1,6 @@
+# 18/10/2026
+- Reentrenamiento con feedback de usuarios por predicciones productivas.
+
 # 15/10/2026
 - La API exige la cabecera `X-API-Key` con la clave `API_KEY` de `.env` en todos los endpoints salvo `GET /`.
 - La extensión de Chrome exige la API Key y la guarda en `chrome.storage.local` en lugar de sincronizarla con la cuenta de Google.
