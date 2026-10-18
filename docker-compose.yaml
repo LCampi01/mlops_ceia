@@ -31,6 +31,7 @@ x-airflow-common: &airflow-common
     OMP_NUM_THREADS: '1'
     OPENBLAS_NUM_THREADS: '1'
     MKL_NUM_THREADS: '1'
+    API_DATABASE_URL: postgresql://airflow:${PG_PASSWORD}@postgres/fastapi
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
