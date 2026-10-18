@@ -1,5 +1,6 @@
 """Reentrena el champion de MLflow incorporando feedback de producción."""
 from datetime import datetime, timedelta, timezone
+import os
 
 from airflow.decorators import dag, task
 
@@ -37,6 +38,9 @@ def phishing_champion_retrain():
         task_id="recopilar_feedback",
         requirements=FEEDBACK_REQUIREMENTS,
         system_site_packages=True,
+        env_vars={
+            "API_DATABASE_URL": os.environ.get("API_DATABASE_URL")
+        }
     )
     def recopilar_feedback(bucket: str, run_id: str) -> str:
         """Obtiene predicciones con feedback de las últimas 24 horas y las sube a S3.
@@ -51,9 +55,9 @@ def phishing_champion_retrain():
         import sqlalchemy as sa
         from airflow.exceptions import AirflowSkipException
 
-        db_url = os.environ.get("DATABASE_URL")
+        db_url = os.environ.get("API_DATABASE_URL")
         if not db_url:
-            raise ValueError("DATABASE_URL no está definida en el entorno de Airflow")
+            raise ValueError("API_DATABASE_URL no está definida en el entorno de Airflow")
 
         engine = sa.create_engine(db_url, pool_pre_ping=True)
         query = sa.text(
